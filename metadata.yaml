@@ -1,5 +1,5 @@
 homepage: https://stape.io/
 documentation: https://github.com/stape-io/tapfiliate-tag
 versions:
-  - sha: <Initial Release Hash>
+  - sha: 0abacb78e6fa1d261476e0f194fe8252adaf1f11
     changeNotes: Initial release.
