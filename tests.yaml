@@ -1,0 +1,115 @@
+setup: |-
+  const JSON = require('JSON');
+  const Promise = require('Promise');
+  const log = require('logToConsole');
+  const callLater = require('callLater');
+
+  const mockData = {
+    referralIdKey: 'ref'
+  };
+
+  mock('getRequestHeader', () => 'Mozilla/5.0');
+  mock('getRemoteAddress', () => '127.0.0.1');
+  mock('setCookie', () => {});
+  mock('getTimestampMillis', () => 1629890000000);
+  mock('computeEffectiveTldPlusOne', () => 'example.com');
+
+  mock('sendHttpRequest', () => {});
+
+scenarios:
+  - name: '[Page View] Exits early if Click ID already exists in cookie'
+    code: |-
+      mockData.type = 'pageview';
+
+      mock('getAllEventData', () => ({
+        page_location: 'https://example.com/?ref=affiliate_123'
+      }));
+
+      mock('getCookieValues', (name) => {
+        if (name === '_tapfiliate_cid') return ['existing_click_456'];
+        return [];
+      });
+
+      runCode(mockData);
+
+      callLater(() => {
+        assertApi('sendHttpRequest').wasNotCalled();
+        assertApi('gtmOnSuccess').wasCalled();
+      });
+  - name: '[Page View] Successfully create Click ID and store in Cookie'
+    code: |-
+      mockData.type = 'pageview';
+      mockData.referralIdKey = 'ref';
+      mockData.apiKey = 'test_api_key';
+      mockData.cookieExpiration = 30;
+
+      mock('getAllEventData', () => ({
+        page_location: 'https://example.com/?ref=affiliate_123'
+      }));
+
+      mock('getCookieValues', () => []);
+
+      let cookieSet = false;
+      mock('setCookie', (name, value, options) => {
+        assertThat(name).isEqualTo('_tapfiliate_cid');
+        assertThat(value).isEqualTo('new_click_123');
+        cookieSet = true;
+      });
+
+      mock('sendHttpRequest', (url, options, body) => {
+        assertThat(url).isEqualTo('https://api.tapfiliate.com/1.6/clicks/');
+        assertThat(options.headers['X-Api-Key']).isEqualTo('test_api_key');
+
+        const parsedBody = JSON.parse(body);
+        assertThat(parsedBody.referral_code).isEqualTo('affiliate_123');
+
+        return Promise.create((resolve) =>
+          resolve({
+            statusCode: 200,
+            body: JSON.stringify({ id: 'new_click_123' })
+          })
+        );
+      });
+
+      runCode(mockData);
+
+      callLater(() => {
+        assertThat(cookieSet).isTrue();
+        assertApi('sendHttpRequest').wasCalled();
+        assertApi('gtmOnSuccess').wasCalled();
+      });
+  - name: '[Conversion] Successfully maps data and sends Conversion request'
+    code: |-
+      mockData.type = 'conversion';
+      mockData.apiKey = 'test_api_key';
+      mockData.additionalParameters = [
+          { key: 'coupon', value: 'SUMMER20' },
+          { key: 'amount', value: 99.99},
+          { key: 'external_id', value: 'T12345'},
+          { key: 'currency', value: 'EUR' },
+        ];
+
+      mock('getCookieValues', () => ['click_789']);
+
+      mock('sendHttpRequest', (url, options, body) => {
+        assertThat(url).isEqualTo('https://api.tapfiliate.com/1.6/conversions/');
+
+        const parsedBody = JSON.parse(body);
+        assertThat(parsedBody.click_id).isEqualTo('click_789');
+        assertThat(parsedBody.amount).isEqualTo(99.99); 
+        assertThat(parsedBody.external_id).isEqualTo('T12345');
+        assertThat(parsedBody.currency).isEqualTo('EUR');
+        assertThat(parsedBody.coupon).isEqualTo('SUMMER20');
+
+        return Promise.create((resolve) => resolve({
+          statusCode: 200,
+          body: JSON.stringify({ success: true })
+        }));
+      });
+
+      runCode(mockData);
+
+      callLater(() => {
+        assertApi('sendHttpRequest').wasCalled();
+        assertApi('gtmOnSuccess').wasCalled();
+      });
